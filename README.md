@@ -19,9 +19,9 @@ graph TD
     
     subgraph "Prime Auth Service"
         API -->|Validate| Schema[Pydantic v2 Schemas]
-        API -->|Business Logic| Service[Service Layer]
-        Service -->|CRUD| DB_Layer[SQLAlchemy Async]
-        Service -->|Hash/Verify| Security[Bcrypt & JWT Provider]
+        API -->|Business Logic| CRUD[CRUD Layer]
+        CRUD -->|Queries| DB_Layer[SQLAlchemy Async]
+        API -->|Hash/Verify| Security[Bcrypt & JWT]
     end
     
     DB_Layer -->|Async Driver| DB[(PostgreSQL)]
@@ -30,13 +30,16 @@ graph TD
 ## 🚀 Key Technical Features
 
 ### Security First
-- **JWT & Refresh Token Rotation**: Implements dual-token architecture to minimize access token lifespan while maintaining user session UX.
-- **Bcrypt Hashing**: Industry-standard adaptive hashing for password storage.
-- **Input Validation**: Rigorous data validation using **Pydantic v2**, ensuring type safety at the API boundary.
+- **JWT access + refresh tokens**: 15-minute access tokens and 7-day refresh tokens, each with a `type` claim so they can't be swapped.
+- **Refresh token rotation with reuse detection**: every refresh token is single-use. Replaying an old one revokes that whole login session.
+- **Bcrypt hashing** (cost 12) with timing-safe login, so response time doesn't reveal which emails are registered.
+- **Rate limiting** on login and registration (slowapi).
+- **Input validation** with Pydantic v2: email format, 8–72 byte passwords, and no client-controlled flags like `is_active`.
 
-### High Performance
-- **Fully Asynchronous**: Built on `asyncio` and SQLAlchemy Async to handle high-concurrency workloads non-blockingly.
-- **Database Optimization**: Uses connection pooling and optimized queries.
+### Production Basics
+- **Fully asynchronous**: FastAPI + SQLAlchemy 2.0 async + asyncpg with a configurable connection pool.
+- **Alembic migrations**, applied automatically when the container starts.
+- **CI**: ruff, pytest with coverage, and a migration drift check against real PostgreSQL.
 
 ## 🛠 Tech Stack
 
@@ -46,7 +49,7 @@ graph TD
 | **Database** | **PostgreSQL** | Reliable OLTP database suitable for structured user data. |
 | **ORM** | **SQLAlchemy (Async)** | Powerful ORM with modern async support (v2.0 style). |
 | **Validation** | **Pydantic v2** | The fastest data validation library for Python, core to FastAPI. |
-| **Auth** | **PyJWT + Passlib** | Standard, battle-tested libraries for token and password handling. |
+| **Auth** | **PyJWT + bcrypt** | Maintained, widely used libraries for tokens and password hashing. |
 
 ## 📦 Project Structure
 
@@ -85,14 +88,15 @@ docker-compose logs -f
     ```bash
     python -m venv venv
     source venv/bin/activate
-    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
     ```
 
 2. **Configuration**
     Copy `.env.example` to `.env` and configure your local Postgres credentials.
 
-3. **Run Application**
+3. **Run Migrations and the Application**
     ```bash
+    alembic upgrade head
     uvicorn app.main:app --reload
     ```
     Access documentation at: `http://localhost:8000/docs`
@@ -102,5 +106,17 @@ docker-compose logs -f
 We use **Pytest** for ensuring reliability.
 
 ```bash
-pytest tests/ -v
+pytest          # 13 tests, in-memory SQLite, no Postgres needed
+ruff check app tests alembic
 ```
+
+## 🔌 Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/v1/auth/register` | Create an account |
+| POST | `/api/v1/auth/login` | OAuth2 password login (form data), returns token pair |
+| POST | `/api/v1/auth/refresh` | Rotate a refresh token |
+| POST | `/api/v1/auth/logout` | Revoke the login session |
+| GET | `/api/v1/users/me` | Current user (Bearer access token) |
+| GET | `/health` | Liveness check |

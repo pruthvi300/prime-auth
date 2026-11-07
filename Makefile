@@ -1,35 +1,33 @@
-# Prime Auth - Makefile
-# Simple commands for development
-
-.PHONY: help dev test lint clean
+.PHONY: help install dev migrate test test-cov lint clean
 
 help:
-	@echo "Prime Auth - Commands"
-	@echo ""
-	@echo "  make dev       Start development server"
-	@echo "  make test      Run tests"
-	@echo "  make test-cov  Run tests with coverage"
-	@echo "  make lint      Run linter"
-	@echo "  make clean     Remove cache files"
+	@echo "make install   Install runtime + dev dependencies"
+	@echo "make dev       Run the API with auto-reload"
+	@echo "make migrate   Apply database migrations"
+	@echo "make test      Run tests"
+	@echo "make test-cov  Run tests with an HTML coverage report"
+	@echo "make lint      Run ruff"
+	@echo "make clean     Remove caches"
 
-# Development
+install:
+	pip install -r requirements-dev.txt
+
 dev:
 	uvicorn app.main:app --reload
 
-# Testing
+migrate:
+	alembic upgrade head
+
 test:
-	pytest tests/ -v
+	pytest
 
 test-cov:
-	pytest tests/ -v --cov=app --cov-report=html
+	pytest --cov=app --cov-report=html
 	@echo "Coverage report: htmlcov/index.html"
 
-# Code Quality
 lint:
-	ruff check app/
+	ruff check app tests alembic
 
-# Cleanup
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf htmlcov/ .coverage
+	rm -rf .pytest_cache .ruff_cache htmlcov .coverage

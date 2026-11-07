@@ -1,54 +1,50 @@
-import pytest
-import pytest_asyncio
-from typing import AsyncGenerator, Generator
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from httpx import AsyncClient, ASGITransport
+import os
 
-from app.db.base import Base
-from app.main import app
-from app.api.deps import get_db
+# Configure the app for tests before anything imports app settings.
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+os.environ.setdefault("BCRYPT_ROUNDS", "4")  # fast hashing in tests
 
-# Use in-memory SQLite for tests
-SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+from collections.abc import AsyncIterator  # noqa: E402
 
-engine = create_async_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    pool_pre_ping=True,
-)
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
-TestingSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+from app.db.base import Base  # noqa: E402
+from app.db.session import get_db  # noqa: E402
+from app.main import app  # noqa: E402
 
-@pytest_asyncio.fixture(scope="function")
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    # Create tables
+API = "/api/v1"
+
+
+@pytest_asyncio.fixture
+async def db_session() -> AsyncIterator[AsyncSession]:
+    # StaticPool keeps one connection so the in-memory database survives across sessions.
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    async with TestingSessionLocal() as session:
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         yield session
-        
-    # Drop tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
 
-@pytest_asyncio.fixture(scope="function")
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+
+@pytest_asyncio.fixture
+async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async def override_get_db():
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
-    
-    # Use ASGITransport to properly handle lifespan events and async app
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
-        
     app.dependency_overrides.clear()
+
+
+async def register(client: AsyncClient, email: str = "user@example.com", password: str = "strongpassword123"):
+    return await client.post(f"{API}/auth/register", json={"email": email, "password": password})
+
+
+async def login(client: AsyncClient, email: str = "user@example.com", password: str = "strongpassword123"):
+    return await client.post(f"{API}/auth/login", data={"username": email, "password": password})

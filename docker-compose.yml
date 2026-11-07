@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: prime
       POSTGRES_PASSWORD: prime_secret
@@ -12,7 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U prime" ]
+      test: ["CMD-SHELL", "pg_isready -U prime -d prime_auth"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -22,14 +20,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://prime:prime_secret@postgres:5432/prime_auth
-      - SECRET_KEY=your-secret-key-change-in-production
+      DATABASE_URL: postgresql+asyncpg://prime:prime_secret@postgres:5432/prime_auth
+      SECRET_KEY: ${SECRET_KEY:-dev-only-secret-change-me}
+      ENVIRONMENT: development
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - .:/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:

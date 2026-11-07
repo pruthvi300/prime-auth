@@ -1,31 +1,32 @@
-from typing import Optional
-from pydantic import BaseModel, EmailStr
+from datetime import datetime
 
-# Shared properties
-class UserBase(BaseModel):
-    email: Optional[EmailStr] = None
-    is_active: Optional[bool] = True
-    full_name: Optional[str] = None
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-# Properties to receive via API on creation
-class UserCreate(UserBase):
+
+class UserCreate(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
+    full_name: str | None = Field(default=None, max_length=200)
 
-# Properties to receive via API on update
-class UserUpdate(UserBase):
-    password: Optional[str] = None
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls, value: str) -> str:
+        return value.strip().lower()
 
-class UserInDBBase(UserBase):
-    id: Optional[int] = None
+    @field_validator("password")
+    @classmethod
+    def fits_bcrypt(cls, value: str) -> str:
+        # bcrypt only uses the first 72 bytes; reject longer input instead of silently truncating.
+        if len(value.encode("utf-8")) > 72:
+            raise ValueError("password must be at most 72 bytes")
+        return value
 
-    class Config:
-        from_attributes = True
 
-# Additional properties to return via API
-class User(UserInDBBase):
-    pass
+class User(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-# Additional properties stored in DB
-class UserInDB(UserInDBBase):
-    hashed_password: str
+    id: int
+    email: EmailStr
+    full_name: str | None = None
+    is_active: bool
+    created_at: datetime

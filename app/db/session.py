@@ -1,36 +1,18 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from collections.abc import AsyncIterator
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.core.config import settings
 
-# Create the Async Engine
-# The engine is the central connectivity point. 
-# 'future=True' enables SQLAlchemy 2.0 style usage.
-engine = create_async_engine(
-    str(settings.SQLALCHEMY_DATABASE_URI),
-    echo=True, # Logs SQL queries. Set to False in production for performance.
-    future=True
-)
+_engine_kwargs: dict = {"echo": settings.SQL_ECHO, "pool_pre_ping": True}
+if not settings.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
+    _engine_kwargs.update(pool_size=settings.DB_POOL_SIZE, max_overflow=settings.DB_MAX_OVERFLOW)
 
-# Async Session Factory
-# This factory generates new Session objects for each request.
-# expire_on_commit=False is required for async settings to prevent detached instance errors.
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autocommit=False,
-    autoflush=False,
-)
+engine = create_async_engine(settings.SQLALCHEMY_DATABASE_URI, **_engine_kwargs)
 
-# Dependency Injection for DB Session
-# This function is used by FastAPI's Depends() to provide a session to route handlers.
-# It uses 'yield' to create a context manager:
-# 1. Setup: Creates the session
-# 2. Yield: Passes session to the route
-# 3. Teardown: Ensures session is closed even if an error occurs
-async def get_db():
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+
+
+async def get_db() -> AsyncIterator[AsyncSession]:
     async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+        yield session
