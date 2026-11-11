@@ -1,6 +1,8 @@
-# Prime Identity Service - Technical Project Overview
+# Prime Auth — Design Notes
 
-## Executive Summary
+Deeper notes on how the service works and why it is built this way. For setup, see the [README](../README.md).
+
+## Overview
 
 **Prime Auth** is a high-performance, asynchronous authentication microservice designed to handle identity management for modern web and mobile applications. It implements industry-standard security protocols (OAuth2, JWT) with a non-blocking architecture built for horizontal scalability.
 
@@ -234,36 +236,6 @@ These are expectations from the design, not measured benchmarks.
 
 ---
 
-## 📁 Folder Structure
-
-```bash
-prime_auth/
-├── alembic/                   # Migrations (versions/0001_initial.py)
-├── app/
-│   ├── api/
-│   │   ├── deps.py            # get_current_user, DbSession
-│   │   └── v1/endpoints/
-│   │       ├── auth.py        # register, login, refresh, logout
-│   │       └── users.py       # /users/me
-│   ├── core/
-│   │   ├── config.py          # Pydantic Settings (env vars)
-│   │   ├── rate_limit.py      # slowapi limiter
-│   │   └── security.py        # JWT + bcrypt
-│   ├── crud/
-│   │   ├── crud_user.py       # user queries, authenticate()
-│   │   └── crud_token.py      # issue / consume / revoke refresh tokens
-│   ├── db/                    # Declarative base, async engine and session
-│   ├── models/                # User, RefreshToken
-│   ├── schemas/               # Pydantic request/response models
-│   └── main.py
-├── tests/                     # pytest + in-memory SQLite
-├── docker-compose.yml
-├── Dockerfile
-├── requirements.txt           # runtime
-└── requirements-dev.txt       # tests + lint
-```
-
----
 
 ## 🔌 API Reference
 
@@ -306,107 +278,3 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 # {"access_token": "eyJ...", "refresh_token": "eyJ...", "token_type": "bearer"}
 ```
 
----
-
-## 🧪 Running the Project
-
-### Quick Start (Docker)
-
-```bash
-cd prime_auth
-docker-compose up --build
-
-# Access:
-# - API: http://localhost:8000
-# - Swagger Docs: http://localhost:8000/docs
-# - Health: http://localhost:8000/health
-```
-
-### Local Development
-
-```bash
-cd prime_auth
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-### Running Migrations
-
-```bash
-# Create a migration after changing models
-alembic revision --autogenerate -m "add phone number to user"
-
-# Apply changes to DB
-alembic upgrade head
-```
-
-### Running Tests
-
-```bash
-pytest tests/ -v
-# Note: conftest.py spins up an in-memory SQLite DB, so tests never touch your local Postgres
-```
-
----
-
-## 📈 Interview Q&A
-
-### Q1: "Explain the JWT structure and how validation works without a database."
-
-> "A JWT has three parts: Header.Payload.Signature. The Header specifies the algorithm (HS256). The Payload contains claims like user_id and expiration. The Signature is `HMAC-SHA256(header + payload, SECRET_KEY)`.
->
-> **Validation requires ZERO database queries:**
-> 1. Take the header and payload from the incoming token
-> 2. Recalculate the signature using the server's SECRET_KEY
-> 3. Compare with the attached signature — if they match, the token is authentic
-> 4. Check the `exp` claim — if expired, reject
->
-> This is why JWTs enable stateless scaling — any server instance with the SECRET_KEY can validate tokens independently.
->
-> In this service, `get_current_user` still does one primary-key lookup after the signature check. That lets a deactivated account lose access immediately instead of after the token expires. It's a deliberate trade-off."
-
-### Q2: "Why Refresh Token Rotation over simple long-lived tokens?"
-
-> "A simple long-lived access token (e.g., 7 days) means an attacker who steals it has a 7-day window of access with no way to detect or revoke it.
->
-> Refresh Token Rotation solves this:
-> 1. Access tokens are short-lived (15 min) — limits damage window
-> 2. Refresh tokens are single-use — each refresh issues a completely new pair
-> 3. **Token reuse detection** — if an old refresh token is used again, it means theft. We revoke every token in that login session's family, forcing re-login
->
-> The stolen token becomes a tripwire that triggers automatic account protection."
-
-### Q3: "How would you scale this for 10,000 logins per second?"
-
-> "The architecture scales very well:
-> 1. **Stateless JWTs** — No session storage needed. Any server can validate tokens, enabling horizontal scaling behind a load balancer
-> 2. **Connection pooling** — pool_size and max_overflow are configurable per instance
-> 3. **Read replicas** — Login reads (find user by email) can go to PostgreSQL replicas
-> 4. **Redis for refresh-token state** — the refresh_token table could move to Redis with a TTL matching token expiry
-> 5. **Shared rate limiting** — Login is already rate limited per IP with slowapi; with many replicas I'd move the counters to Redis
->
-> The main bottleneck is bcrypt (a few hundred ms per hash), but that's by design — it's the security trade-off that prevents brute-force attacks."
-
-### Q4: "What's the difference between Authentication and Authorization?"
-
-> "**Authentication** = 'Who are you?' — Verifying identity via credentials (what Prime Auth handles)
-> **Authorization** = 'What can you do?' — Checking permissions/roles (RBAC)
->
-> In Prime Auth, I implement authentication. The `is_superuser` flag is a simple authorization check, but for full RBAC (roles, permissions, scopes), I'd add a roles table and middleware that checks permissions per endpoint."
-
----
-
-## 🎯 Skills Demonstrated
-
-| Category | Technologies |
-|----------|-------------|
-| **Backend** | Python, FastAPI, Async/Await, Pydantic v2 |
-| **Security** | JWT (HS256), OAuth2 password flow, Bcrypt, Refresh Token Rotation with reuse detection, Rate limiting |
-| **Database** | PostgreSQL, Async SQLAlchemy 2.0, Connection Pooling, Alembic Migrations |
-| **Architecture** | Dependency Injection, Clean Architecture, Stateless Design |
-| **Testing** | Pytest, pytest-asyncio, In-memory SQLite Test DB |
-| **DevOps** | Docker, Docker Compose, GitHub Actions (lint, tests, migration check) |
