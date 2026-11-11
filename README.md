@@ -19,6 +19,16 @@ An asynchronous authentication service built with **FastAPI**, **SQLAlchemy 2.0 
 - **Alembic migrations**, applied automatically when the container starts.
 - **CI** on GitHub Actions: ruff, pytest with coverage, and a migration drift check against a real PostgreSQL.
 
+## Screenshots
+
+**Token theft, caught.** A real run against the service: a replayed refresh token revokes the whole session, and repeated bad logins are rate-limited.
+
+![Refresh-token rotation and rate limiting](docs/screenshots/token-rotation.png)
+
+**Interactive API docs** at `/docs` (Swagger UI)
+
+![Swagger UI](docs/screenshots/api-docs.png)
+
 ## Architecture
 
 ```mermaid
